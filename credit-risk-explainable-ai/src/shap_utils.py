@@ -49,6 +49,26 @@ def _is_tree_model(model) -> bool:
     return type(model).__name__ in ("RandomForestClassifier", "XGBClassifier")
 
 
+def _positive_class_shap(shap_values):
+    """Normalize whatever shape shap_values() returns into a plain
+    (n_samples, n_features) array for the positive ("default") class.
+
+    Different shap versions return different shapes for binary
+    classifiers:
+      - older shap: a list of two (n_samples, n_features) arrays, one
+        per class -> we want index 1.
+      - newer shap (0.52+): a single (n_samples, n_features, n_classes)
+        ndarray -> we want [..., 1].
+      - already (n_samples, n_features): used as-is.
+    """
+    if isinstance(shap_values, list):
+        return np.asarray(shap_values[1])
+    arr = np.asarray(shap_values)
+    if arr.ndim == 3:
+        return arr[..., 1]
+    return arr
+
+
 # ---------------------------------------------------------------------------
 # Global explanation (Explainability tab)
 # ---------------------------------------------------------------------------
@@ -75,12 +95,12 @@ def compute_global_importance(pipeline, X: pd.DataFrame, max_samples: int = 250)
             if _is_tree_model(model):
                 explainer = shap.TreeExplainer(model)
                 shap_values = explainer.shap_values(X_transformed)
-                if isinstance(shap_values, list):
-                    shap_values = shap_values[1]
+                shap_values = _positive_class_shap(shap_values)
             else:
                 background = shap.sample(X_transformed, min(100, len(X_transformed)))
                 explainer = shap.LinearExplainer(model, background)
                 shap_values = explainer.shap_values(X_transformed)
+                shap_values = _positive_class_shap(shap_values)
 
             return ExplainabilityBackend.SHAP, feature_names, shap_values
         except Exception:
@@ -123,11 +143,11 @@ def compute_local_importance(pipeline, single_row: pd.DataFrame, background_df: 
             if _is_tree_model(model):
                 explainer = shap.TreeExplainer(model)
                 shap_values = explainer.shap_values(X_transformed)
-                if isinstance(shap_values, list):
-                    shap_values = shap_values[1]
+                shap_values = _positive_class_shap(shap_values)
             else:
                 explainer = shap.LinearExplainer(model, X_transformed)
                 shap_values = explainer.shap_values(X_transformed)
+                shap_values = _positive_class_shap(shap_values)
 
             return ExplainabilityBackend.SHAP, feature_names, shap_values[0]
         except Exception:
